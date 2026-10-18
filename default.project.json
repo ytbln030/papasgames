@@ -16,6 +16,11 @@
     },
 
     "StarterPlayer": {
+      "$properties": {
+        "CameraMode": "LockFirstPerson",
+        "CharacterJumpHeight": 0,
+        "CharacterJumpPower": 0
+      },
       "StarterPlayerScripts": {
         "Client": {
           "$path": "src/client"
@@ -27,25 +32,21 @@
       "$properties": {
         "FilteringEnabled": true
       },
-      "Baseplate": {
+      "DeathZone": {
         "$className": "Part",
         "$properties": {
           "Anchored": true,
-          "Color": [
-            0.38823,
-            0.37254,
-            0.38823
-          ],
-          "Locked": true,
+          "CanCollide": false,
+          "Transparency": 1,
           "Position": [
             0,
-            -10,
+            -50,
             0
           ],
           "Size": [
-            512,
-            20,
-            512
+            1000,
+            2,
+            1000
           ]
         }
       }
@@ -53,33 +54,33 @@
     "Lighting": {
       "$properties": {
         "Ambient": [
-          0.25,
+          0,
           0,
           0
         ],
         "Brightness": 2,
         "ClockTime": 18.5,
         "ColorShift_Bottom": [
-          0.4,
+          0,
           0,
           0
         ],
         "ColorShift_Top": [
-          1,
-          0.12,
-          0.08
+          0,
+          0,
+          0
         ],
         "FogColor": [
-          1,
-          0.1,
-          0.08
+          0.752941,
+          0.752941,
+          0.752941
         ],
         "FogEnd": 800,
         "GlobalShadows": true,
         "OutdoorAmbient": [
-          0.75,
-          0.08,
-          0.06
+          0,
+          0,
+          0
         ],
         "Outlines": false,
         "Technology": "Voxel"
@@ -88,14 +89,14 @@
         "$className": "Atmosphere",
         "$properties": {
           "Color": [
-            1,
-            0.12,
-            0.08
+            0.7843,
+            0.6667,
+            0.4235
           ],
           "Decay": [
-            0.7,
-            0.04,
-            0
+            0.3608,
+            0.2353,
+            0.0549
           ],
           "Density": 0.4,
           "Glare": 0.25,
