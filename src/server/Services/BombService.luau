@@ -210,8 +210,17 @@ local function resolveBomb(player: Player, bombTile: GridPosition, bombWorldPos:
 	end
 
 	if outcome == "MISS" then
+		-- GameService erzeugt bei Task 008 sofort ein neues Target auf BombResolved
+		-- hin, also noch bevor dieser verzögerte Aufruf feuert. Ohne Id-Vergleich
+		-- würde er dann das längst aktive NEUE Target zerstören statt des
+		-- gemissten (siehe decisions/010-miss-destroy-targets-by-id.md).
+		local missedTarget = TargetService.GetActiveTarget()
+		local missedTargetId = missedTarget and missedTarget.id
 		task.delay(MISS_DISPLAY_DELAY, function()
-			TargetService.DestroyActiveTarget()
+			local current = TargetService.GetActiveTarget()
+			if current and current.id == missedTargetId then
+				TargetService.DestroyActiveTarget()
+			end
 		end)
 	else
 		TargetService.DestroyActiveTarget()

@@ -63,4 +63,25 @@
 
 ## Ergebnis (von der ausführenden Task-Session auszufüllen)
 
-_Noch nicht ausgeführt._
+Implementiert in `GameService.luau` (gemeinsamer `handleFailure`-Pfad für alle vier Fehlerquellen, `applySuccessScore`, `spawnNextTarget`). Alle fünf Teststrategie-Schritte wurden tatsächlich in Roblox Studio durchgespielt (Play Solo, über die Roblox-Studio-MCP-Tools: `RequestPlay`/`PlaceBomb` per echtem `RemoteEvent` vom Client aus gefeuert, Positionierung server-autoritativ über `execute_luau`, Ergebnisse über die neu ergänzten Server-Prints sowie die gefeuerten `GameEvent`-Payloads verifiziert).
+
+**1. Punkteberechnung (mehrere SUCCESS-Runden):**
+Beobachtete Server-Prints, jeweils gegen `100 + floor(Restzeit * 10)` nachgerechnet:
+- `Restzeit=17.98s -> +279` (100+179 ✓), `Restzeit=17.45s -> +274` (100+174 ✓), `Restzeit=18.93s -> +289` (100+189 ✓, zweimal), `Restzeit=16.48s -> +264` (100+164 ✓). Formel reproduziert sich in jedem Fall exakt; die Spec-Beispielrechnung (12s → 220) folgt derselben Formel.
+
+**2. Level-Aufstieg:**
+Drei SUCCESS-Runden in Folge: `levelScore` 553 → 842 → 1131. Bei Erreichen von 1131 ≥ `ScoreRequired`(Level 1)=1000: Server-Print `Level-Aufstieg -> Level 2 (nächstes Target TargetLifetime=18s)`; `score` blieb bei 1131 (unverändert durch den Aufstieg, §30), `levelScore` wurde auf 0 zurückgesetzt. Das nächste Target verwendete tatsächlich `TargetLifetime=18` (Level-2-Konfiguration).
+
+**3. Lebensverlust für alle vier Fehlerquellen (je genau 1 Leben):**
+Server-Prints für jede Quelle einzeln beobachtet: `Fehlversuch (TIMEOUT), lives: 3 -> 2`, `Fehlversuch (MISS), lives: 3 -> 2`, `Fehlversuch (HIT_BY_EXPLOSION), lives: 3 -> 2`, `Fehlversuch (FALL), lives: 3 -> 2` (FALL via Teleport des Charakters auf die `DeathZone`-Position ausgelöst, reales `PlayerFell`-Touched-Event). Nie mehr als 1 Leben pro Vorfall.
+
+**4. Game Over bei 0 Leben:**
+Mehrfach reproduziert (u. a. `Fehlversuch (MISS), lives: 1 -> 0` → `GAME_OVER, score=0`; auch für TIMEOUT, HIT_BY_EXPLOSION und FALL als auslösende letzte Fehlerquelle beobachtet). Nach `GAME_OVER` wurde über denselben RemoteEvent-Kanal ein `PlaceBomb`-Intent gefeuert und erzeugte nachweislich **kein** Event (keine Zustandsänderung, kein neues Target) - `onPlaceBomb`s State-Guard greift korrekt. Ein neues Target entstand erst wieder nach explizitem `RequestPlay`.
+
+**5. Sofortiges neues Target nach Fehlversuch / verzögert nach Erfolg:**
+Nach TIMEOUT/MISS/HIT_BY_EXPLOSION erschien jeweils unmittelbar (`NEXT_TARGET` → `TargetSpawned` → `TARGET_ACTIVE`, ohne Verzögerung) ein neues Target. Nach SUCCESS erschien das neue Target nach der konfigurierten kurzen Verzögerung (0,75s). Nach FALL (nicht-tödlich) wurden **keine** Events ausgelöst (`eventsDuringFall = []`) und dasselbe Target blieb nachweislich aktiv - anschließend erfolgreich mit `SUCCESS` auf genau diesem (unveränderten) Target abgeschlossen, exakt wie [`decisions/008-fall-does-not-reset-target.md`](../decisions/008-fall-does-not-reset-target.md) vorschreibt.
+
+**Während der Tests gefundener und behobener Zusatzfehler (außerhalb des ursprünglichen Scopes von Task 008):**
+`BombService`s verzögertes MISS-Despawn (`MISS_DISPLAY_DELAY`) zerstörte bei schnell aufeinanderfolgenden Runden das bereits von `GameService` neu erzeugte Target statt des gemissten, da `TargetService.DestroyActiveTarget()` keine Zielreferenz kennt. Das war mit der alten Platzhalter-Logik unsichtbar und wurde erst durch Task 008s korrektes "sofort neues Target"-Verhalten reproduzierbar (bei jedem MISS). Dokumentiert und minimal-invasiv behoben in [`decisions/010-miss-destroy-targets-by-id.md`](../decisions/010-miss-destroy-targets-by-id.md) (Id-Vergleich vor dem verzögerten Destroy in `BombService.resolveBomb`); Fix in Studio verifiziert (neues Target überlebt die 1s-Verzögerung und erreicht seinen eigenen natürlichen Timeout/seine eigene Auflösung).
+
+Alle Akzeptanzkriterien erfüllt. **Meilenstein erreicht:** kompletter serverseitiger MVP-Kernloop (Start → Target → Bombe → Explosion → Score → nächstes Target → Game Over) ist funktionsfähig und wurde live in Studio durchgespielt.

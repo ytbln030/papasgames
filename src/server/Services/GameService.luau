@@ -4,11 +4,8 @@
 -- PlayerSessionData mutiert. Orchestriert BoardService/PlayerService/
 -- TargetService/BombService, reagiert auf ClientAction und broadcastet
 -- GameEvent. Siehe ARCHITECTURE.md Abschnitt 7/8, tasks/006-networking-and-
--- state-machine.md und tasks/007-bomb-and-explosion.md.
---
--- Vollständige, geprüfte Score-/Level-/Game-Over-Logik (Task 008) ist hier
--- bewusst nur als rudimentärer Lebens-Dekrement vorhanden, damit der
--- Spiel-Loop nicht einfriert.
+-- state-machine.md, tasks/007-bomb-and-explosion.md und tasks/008-scoring-
+-- and-level-progression.md (vollständige Score-/Level-/Game-Over-Logik).
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -29,7 +26,16 @@ type GameStateName = GameTypes.GameStateName
 type PlayerSessionData = GameTypes.PlayerSessionData
 type BombOutcome = GameTypes.BombOutcome
 
+-- Interner Diskriminator für HandleFailure, bewusst kein GameTypes.BombOutcome
+-- (Timeout/Sturz sind keine Bomben-Ergebnisse) und bewusst kein neuer Typ in
+-- GameTypes.luau (Task 008 betrifft laut Scope nur GameService.luau).
+type FailureReason = "TIMEOUT" | "MISS" | "HIT_BY_EXPLOSION" | "FALL"
+
 local GameService = {}
+
+-- Spec §25: ca. 0,5-1s Verzögerung nach Erfolg, bevor automatisch das
+-- nächste Target entsteht.
+local SUCCESS_NEXT_TARGET_DELAY = 0.75
 
 local sessions: { [Player]: PlayerSessionData } = {}
 
@@ -37,6 +43,12 @@ local sessions: { [Player]: PlayerSessionData } = {}
 -- fixed-per-session.md) - ein boolescher Schalter statt eines Zählers genügt
 -- für das Singleplayer-MVP.
 local boardCreated = false
+
+-- Restzeit des Target-Timers zum Platzierungszeitpunkt der Bombe (Spec §28)
+-- muss zwischengespeichert werden, weil BombService.BombResolved erst nach
+-- Ablauf der Fuse feuert - zu diesem Zeitpunkt ist die "Restzeit beim
+-- Platzieren" nicht mehr aus dem Target selbst rekonstruierbar.
+local pendingRemainingTime: { [Player]: number } = {}
 
 local clientActionRemote: RemoteEvent
 local gameEventRemote: RemoteEvent
@@ -75,6 +87,98 @@ local function getPlayerGridPosition(player: Player): GridPosition
 	local rootPart = character and (character:FindFirstChild("HumanoidRootPart") :: BasePart?)
 	assert(rootPart, "GameService: Spieler hat kein HumanoidRootPart nach PlayerService.SpawnPlayer")
 	return BoardService.WorldToGrid(rootPart.Position)
+end
+
+-- Gemeinsamer Pfad für den automatischen Zustandswechsel NEXT_TARGET →
+-- TARGET_ACTIVE (Spec §17/§25/§26) - verwendet sowohl nach Erfolg (mit
+-- Verzögerung) als auch nach jedem Fehlversuch ohne Game Over (sofort).
+-- Prüft bei verzögerter Ausführung erneut auf GAME_OVER/MENU, damit ein in
+-- der Zwischenzeit erfolgter Game-Over- oder RequestPlay-Übergang nicht
+-- durch ein verspätetes Target überschrieben wird.
+local function spawnNextTarget(player: Player, delaySeconds: number): ()
+	local function doSpawn(): ()
+		local session = sessions[player]
+		if not session or session.state == "GAME_OVER" or session.state == "MENU" then
+			return
+		end
+
+		setState(player, "NEXT_TARGET")
+
+		local levelConfig = LevelConfig.GetConfig(session.level)
+		local playerGridPosition = getPlayerGridPosition(player)
+		local target = TargetService.CreateTarget(levelConfig, playerGridPosition)
+		fireGameEvent(player, { type = Net.GameEventType.TargetSpawned, target = target })
+
+		setState(player, "TARGET_ACTIVE")
+	end
+
+	if delaySeconds > 0 then
+		task.delay(delaySeconds, doSpawn)
+	else
+		doSpawn()
+	end
+end
+
+-- Spec §28/§30: Punkte- und Zeitbonus-Berechnung plus Level-Aufstieg.
+-- score bleibt beim Aufstieg unverändert (§30), nur levelScore wird
+-- zurückgesetzt.
+local function applySuccessScore(player: Player, remainingTimeSeconds: number): ()
+	local session = sessions[player]
+	if not session then
+		return
+	end
+
+	local gained = GameConfig.Scoring.BasePoints + math.floor(remainingTimeSeconds * GameConfig.Scoring.TimeBonusPerSecond)
+	session.score += gained
+	session.levelScore += gained
+
+	print(("GameService: %s SUCCESS, Restzeit=%.2fs, +%d Punkte -> score=%d levelScore=%d"):format(
+		player.Name, remainingTimeSeconds, gained, session.score, session.levelScore))
+
+	local currentLevelConfig = LevelConfig.GetConfig(session.level)
+	if session.levelScore >= currentLevelConfig.ScoreRequired then
+		session.level += 1
+		session.levelScore = 0
+		print(("GameService: %s Level-Aufstieg -> Level %d (nächstes Target TargetLifetime=%ds)"):format(
+			player.Name, session.level, LevelConfig.GetConfig(session.level).TargetLifetime))
+	end
+
+	fireGameEvent(player, {
+		type = Net.GameEventType.ScoreUpdated,
+		score = session.score,
+		levelScore = session.levelScore,
+		level = session.level,
+	})
+end
+
+-- Einziger Pfad "Fehlversuch verarbeiten" (Spec §17/§24/§26, Task 008
+-- Technische Vorgabe) für alle vier Fehlerquellen. Zieht genau 1 Leben ab,
+-- nie kumuliert, und entscheidet zwischen Game Over und neuem Target.
+-- Sturz (decisions/008-fall-does-not-reset-target.md) ist die Ausnahme:
+-- außer beim finalen Game-Over-Übergang bleiben Zustand und aktives Target
+-- unverändert.
+local function handleFailure(player: Player, reason: FailureReason): ()
+	local session = sessions[player]
+	if not session then
+		return
+	end
+
+	local livesBefore = session.lives
+	session.lives = math.max(session.lives - 1, 0)
+	print(("GameService: %s Fehlversuch (%s), lives: %d -> %d"):format(player.Name, reason, livesBefore, session.lives))
+
+	if session.lives <= 0 then
+		setState(player, "GAME_OVER")
+		fireGameEvent(player, { type = Net.GameEventType.GameOver, score = session.score })
+		print(("GameService: %s GAME_OVER, score=%d"):format(player.Name, session.score))
+		return
+	end
+
+	if reason == "FALL" then
+		return
+	end
+
+	spawnNextTarget(player, 0)
 end
 
 local function onRequestPlay(player: Player): ()
@@ -118,6 +222,14 @@ local function onPlaceBomb(player: Player): ()
 		return
 	end
 
+	-- Restzeit zum Platzierungszeitpunkt sichern (Spec §28 - die Fuse-Zeit
+	-- zählt nicht als Restzeit, siehe tasks/008 Funktionale Anforderung 1).
+	local activeTarget = TargetService.GetActiveTarget()
+	if activeTarget then
+		local elapsed = os.clock() - activeTarget.spawnedAt
+		pendingRemainingTime[player] = math.max(activeTarget.lifetime - elapsed, 0)
+	end
+
 	setState(player, "BOMB_PLACED")
 	fireGameEvent(player, { type = Net.GameEventType.BombPlaced })
 end
@@ -143,9 +255,8 @@ local function onBombExploded(player: Player): ()
 	end
 end
 
--- Validiertes Ergebnis von BombService (Spec §24). Score-/Lebens-
--- Konsequenzen folgen in Task 008 - hier nur der State-Übergang plus
--- Broadcast des Ergebnisses.
+-- Validiertes Ergebnis von BombService (Spec §24): bei SUCCESS Punkte-/
+-- Levellogik, bei MISS/HIT_BY_EXPLOSION der gemeinsame Fehlversuch-Pfad.
 local function onBombResolved(player: Player, outcome: BombOutcome): ()
 	local session = sessions[player]
 	if not session then
@@ -154,29 +265,36 @@ local function onBombResolved(player: Player, outcome: BombOutcome): ()
 
 	setState(player, "ROUND_RESULT")
 	fireGameEvent(player, { type = Net.GameEventType.RoundResult, outcome = outcome })
+
+	local remainingTime = pendingRemainingTime[player] or 0
+	pendingRemainingTime[player] = nil
+
+	if outcome == "SUCCESS" then
+		applySuccessScore(player, remainingTime)
+		spawnNextTarget(player, SUCCESS_NEXT_TARGET_DELAY)
+	elseif outcome == "MISS" then
+		handleFailure(player, "MISS")
+	else
+		handleFailure(player, "HIT_BY_EXPLOSION")
+	end
 end
 
--- Platzhalter-Reaktion (volle Konsequenz-Logik inkl. Game-Over-Prüfung folgt
--- in Task 008): mindestens muss ein neues Target entstehen, damit der Loop
--- nicht einfriert. Reagiert nur für Spieler, deren Session gerade aktiv auf
--- dieses Target wartet.
+-- Abgelaufenes Target ohne platzierte Bombe zählt als Fehlversuch (Spec
+-- §17). Reagiert nur für Spieler, deren Session gerade aktiv auf dieses
+-- Target wartet.
 local function onTargetExpired(): ()
 	for player, session in sessions do
 		if session.state == "TARGET_ACTIVE" then
-			session.lives = math.max(session.lives - 1, 0)
+			setState(player, "ROUND_RESULT")
 			fireGameEvent(player, { type = Net.GameEventType.TargetCleared })
-
-			local levelConfig = LevelConfig.GetConfig(session.level)
-			local playerGridPosition = getPlayerGridPosition(player)
-			local target = TargetService.CreateTarget(levelConfig, playerGridPosition)
-			fireGameEvent(player, { type = Net.GameEventType.TargetSpawned, target = target })
+			handleFailure(player, "TIMEOUT")
 		end
 	end
 end
 
--- Platzhalter-Reaktion analog onTargetExpired. Ändert bewusst weder Zustand
--- noch aktives Target (decisions/008-fall-does-not-reset-target.md) - nur ein
--- rudimentärer Lebens-Dekrement, volle Prüfung folgt in Task 008.
+-- Sturz (decisions/008-fall-does-not-reset-target.md): Lebensverlust über
+-- den gemeinsamen Fehlversuch-Pfad, aber ohne Zustands-/Targetwechsel außer
+-- beim finalen Übergang nach GAME_OVER.
 local function onPlayerFell(player: Player): ()
 	local session = sessions[player]
 	if not session then
@@ -186,7 +304,7 @@ local function onPlayerFell(player: Player): ()
 		return
 	end
 
-	session.lives = math.max(session.lives - 1, 0)
+	handleFailure(player, "FALL")
 end
 
 local function onPlayerAdded(player: Player): ()
@@ -201,6 +319,7 @@ end
 
 local function onPlayerRemoving(player: Player): ()
 	sessions[player] = nil
+	pendingRemainingTime[player] = nil
 end
 
 local initialized = false
