@@ -11,6 +11,7 @@
 -- zeigt den Startscreen deshalb proaktiv an, statt auf ein erstes Signal zu
 -- warten, und verlässt sich danach ausschließlich auf StateChanged/GameOver.
 
+local ContextActionService = game:GetService("ContextActionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -25,6 +26,7 @@ local MainMenuUI = {}
 
 local GAME_TITLE = "PAPA"
 local GAME_OVER_TITLE = "GAME OVER"
+local PLAY_ACTION = "MainMenuPlay"
 
 local menuGui: ScreenGui? = nil
 local startScreen: Frame
@@ -36,19 +38,46 @@ local function onPlayClicked(): ()
 	GameClientController.RequestPlay()
 end
 
+-- Taste E löst denselben PLAY-Intent aus wie der Button-Klick. Nur gebunden,
+-- während der Menü-/Game-Over-Screen sichtbar ist (bind/unbind in
+-- ShowStart/ShowGameOver/Hide), damit E während einer aktiven Session
+-- ausschließlich InputController.PlaceBomb auslöst und nicht zusätzlich
+-- GameClientController.RequestPlay() (würde die laufende Session
+-- zurücksetzen, siehe GameService.onRequestPlay).
+local function onPlayAction(_actionName: string, inputState: Enum.UserInputState, _inputObject: InputObject): Enum.ContextActionResult?
+	if inputState == Enum.UserInputState.Begin then
+		onPlayClicked()
+	end
+	return Enum.ContextActionResult.Pass
+end
+
+local function bindPlayAction(): ()
+	ContextActionService:BindActionAtPriority(
+		PLAY_ACTION,
+		onPlayAction,
+		false,
+		Enum.ContextActionPriority.Default.Value,
+		Enum.KeyCode.E
+	)
+end
+
+local function unbindPlayAction(): ()
+	ContextActionService:UnbindAction(PLAY_ACTION)
+end
+
 local function createPlayButton(parent: Instance, layoutOrder: number): TextButton
 	local button = Instance.new("TextButton")
 	button.Name = "PlayButton"
 	button.LayoutOrder = layoutOrder
 	button.AutomaticSize = Enum.AutomaticSize.None
-	button.Size = UDim2.new(0, 220, 0, 56)
+	button.Size = UDim2.new(0, 260, 0, 56)
 	button.BackgroundColor3 = Color3.fromRGB(235, 235, 240)
 	button.AutoButtonColor = true
 	button.BorderSizePixel = 0
 	button.Font = Enum.Font.GothamBold
 	button.TextSize = 24
 	button.TextColor3 = Color3.fromRGB(10, 10, 14)
-	button.Text = "PLAY"
+	button.Text = "PLAY [E]"
 	button.Parent = parent
 
 	local corner = Instance.new("UICorner")
@@ -130,6 +159,7 @@ function MainMenuUI.ShowStart(): ()
 	startScreen.Visible = true
 	gameOverScreen.Visible = false
 	gui.Enabled = true
+	bindPlayAction()
 end
 
 function MainMenuUI.ShowGameOver(score: number): ()
@@ -138,12 +168,14 @@ function MainMenuUI.ShowGameOver(score: number): ()
 	startScreen.Visible = false
 	gameOverScreen.Visible = true
 	gui.Enabled = true
+	bindPlayAction()
 end
 
 function MainMenuUI.Hide(): ()
 	if menuGui then
 		menuGui.Enabled = false
 	end
+	unbindPlayAction()
 end
 
 local function onStateChanged(state: GameStateName): ()
