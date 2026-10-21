@@ -1,5 +1,5 @@
 -- Composition Root. Bootstrap-Reihenfolge siehe ARCHITECTURE.md Abschnitt 3.
--- MainMenuUI/EffectsController folgen in Task 011/012.
+-- EffectsController folgt in Task 012.
 --
 -- GameHudUI wird hier (statt wie in Abschnitt 3 ursprünglich vorgesehen
 -- lazy von GameClientController beim ersten GameEvent) direkt analog zu
@@ -11,7 +11,9 @@
 local GameClientController = require(script.Controllers.GameClientController)
 local InputController = require(script.Controllers.InputController)
 local GameHudUI = require(script.UI.GameHudUI)
+local MainMenuUI = require(script.UI.MainMenuUI)
 
 GameClientController.Init()
 InputController.Init()
 GameHudUI.Init()
+MainMenuUI.Init()
