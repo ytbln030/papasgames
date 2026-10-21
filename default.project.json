@@ -54,12 +54,12 @@
     "Lighting": {
       "$properties": {
         "Ambient": [
-          0,
-          0,
-          0
+          0.235,
+          0.235,
+          0.275
         ],
-        "Brightness": 2,
-        "ClockTime": 18.5,
+        "Brightness": 1.5,
+        "ClockTime": 0,
         "ColorShift_Bottom": [
           0,
           0,
@@ -71,16 +71,16 @@
           0
         ],
         "FogColor": [
-          0.752941,
-          0.752941,
-          0.752941
+          0.03,
+          0.03,
+          0.05
         ],
         "FogEnd": 800,
         "GlobalShadows": true,
         "OutdoorAmbient": [
-          0,
-          0,
-          0
+          0.235,
+          0.235,
+          0.275
         ],
         "Outlines": false,
         "Technology": "Voxel"
@@ -89,18 +89,18 @@
         "$className": "Atmosphere",
         "$properties": {
           "Color": [
-            0.7843,
-            0.6667,
-            0.4235
+            0.3,
+            0.32,
+            0.38
           ],
           "Decay": [
-            0.3608,
-            0.2353,
-            0.0549
+            0.12,
+            0.12,
+            0.16
           ],
-          "Density": 0.4,
-          "Glare": 0.25,
-          "Haze": 5,
+          "Density": 0.25,
+          "Glare": 0,
+          "Haze": 0.5,
           "Offset": 0.2
         }
       }
