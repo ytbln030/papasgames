@@ -21,6 +21,7 @@ Net.GameEventType = {
 	BombPlaced = "BombPlaced",
 	RoundResult = "RoundResult",
 	ScoreUpdated = "ScoreUpdated",
+	LivesChanged = "LivesChanged",
 	GameOver = "GameOver",
 }
 

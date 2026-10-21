@@ -167,6 +167,10 @@ local function handleFailure(player: Player, reason: FailureReason): ()
 	session.lives = math.max(session.lives - 1, 0)
 	print(("GameService: %s Fehlversuch (%s), lives: %d -> %d"):format(player.Name, reason, livesBefore, session.lives))
 
+	-- Deckt auch den stillen Sturz-Fall ab (reason == "FALL" ohne Game Over
+	-- feuert sonst gar kein GameEvent), siehe decisions/011.
+	fireGameEvent(player, { type = Net.GameEventType.LivesChanged, lives = session.lives })
+
 	if session.lives <= 0 then
 		setState(player, "GAME_OVER")
 		fireGameEvent(player, { type = Net.GameEventType.GameOver, score = session.score })
@@ -188,6 +192,7 @@ local function onRequestPlay(player: Player): ()
 	session.score = 0
 	session.levelScore = 0
 	session.level = 1
+	fireGameEvent(player, { type = Net.GameEventType.LivesChanged, lives = session.lives })
 	setState(player, "STARTING")
 
 	local levelConfig = LevelConfig.GetConfig(1)

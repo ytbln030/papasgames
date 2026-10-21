@@ -161,7 +161,7 @@ Quelle: Spec §30–§32. `BoardSize` bleibt über alle MVP-Level konstant ([`de
 Genau **zwei** `RemoteEvent`-Instanzen unter `ReplicatedStorage.Remotes` (zur Laufzeit von `Net.EnsureRemotes()` server-seitig erzeugt, Client wartet per `WaitForChild`):
 
 - **`ClientAction`** (Client → Server): `{ type: "RequestPlay" | "PlaceBomb" }`
-- **`GameEvent`** (Server → Client): `{ type: "StateChanged" | "TargetSpawned" | "TargetCleared" | "BombPlaced" | "RoundResult" | "ScoreUpdated" | "GameOver", ... }`
+- **`GameEvent`** (Server → Client): `{ type: "StateChanged" | "TargetSpawned" | "TargetCleared" | "BombPlaced" | "RoundResult" | "ScoreUpdated" | "LivesChanged" | "GameOver", ... }`
 
 Begründung für nur zwei generische Remotes statt der drei benannten Remotes aus Spec §35: [`decisions/001-remote-consolidation.md`](decisions/001-remote-consolidation.md). Neue Nachrichten werden über neue `type`-Werte hinzugefügt, nicht über neue `RemoteEvent`-Instanzen.
 
@@ -202,12 +202,12 @@ Erzeugt **nicht** die `DeathZone` (die ist ein statischer, in `default.project.j
 ### `GameService`
 - Hält `PlayerSessionData` pro Spieler und die State Machine (die 7+1 Zustände aus Spec §34).
 - Verarbeitet `ClientAction`: `RequestPlay` → neue Session (Level 1, Score 0, 3 Leben), `PlaceBomb` → `BombService.TryPlaceBomb` (bei Erfolg State-Übergang nach `BOMB_PLACED`); reagiert auf `BombService.BombExploded`/`BombResolved` mit den Übergängen nach `EXPLODING`/`ROUND_RESULT`.
-- Wendet Konsequenzen an: Score/Zeitbonus (Spec §28), Level-Aufstieg (Spec §30, [`decisions/007`](decisions/007-board-size-fixed-per-session.md)), Lebensverlust bei Timeout/MISS/HIT_BY_EXPLOSION/Fall (genau 1 Leben pro Vorfall, nie kumuliert, Spec §24), Game Over bei 0 Leben.
+- Wendet Konsequenzen an: Score/Zeitbonus (Spec §28), Level-Aufstieg (Spec §30, [`decisions/007`](decisions/007-board-size-fixed-per-session.md)), Lebensverlust bei Timeout/MISS/HIT_BY_EXPLOSION/Fall (genau 1 Leben pro Vorfall, nie kumuliert, Spec §24), Game Over bei 0 Leben. Jede Lebensänderung (inkl. des stillen Sturz-Falls ohne sonstigen State-Wechsel) wird zusätzlich per `GameEvent{type="LivesChanged", lives}` gemeldet, siehe [`decisions/011`](decisions/011-lives-changed-gameevent.md).
 - Broadcastet `GameEvent` an den/die betroffenen Client(s).
 
 ### `GameClientController` (Client)
 - Einziger `GameEvent`-Listener. Hält lokalen Spiegel von `PlayerSessionData` + aktuellem `TargetData`.
-- Exponiert Signals: `StateChanged`, `TargetSpawned`, `TargetCleared`, `BombPlaced`, `RoundResult`, `ScoreUpdated`, `GameOver`. `GameHudUI`, `MainMenuUI` und `EffectsController` abonnieren diese, statt selbst `GameEvent.OnClientEvent` zu binden.
+- Exponiert Signals: `StateChanged`, `TargetSpawned`, `TargetCleared`, `BombPlaced`, `RoundResult`, `ScoreUpdated`, `LivesChanged`, `GameOver`. `GameHudUI`, `MainMenuUI` und `EffectsController` abonnieren diese, statt selbst `GameEvent.OnClientEvent` zu binden.
 
 ---
 
