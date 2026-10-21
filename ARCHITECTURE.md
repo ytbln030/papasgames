@@ -194,12 +194,14 @@ Erzeugt **nicht** die `DeathZone` (die ist ein statischer, in `default.project.j
 - Event `TargetExpired()` — nach Ablauf von `lifetime` ohne Bombenplatzierung.
 
 ### `BombService`
-- `TryPlaceBomb(player: Player): BombOutcome?` — gibt `nil` zurück, wenn Platzierung ungültig ist (falscher State oder bereits eine Bombe für dieses Target), sonst nach Ablauf der Fuse (`LevelConfig.BombFuse`) das Ergebnis. Mutiert selbst **keine** Lives/Score — das macht `GameService`.
+- `TryPlaceBomb(player: Player, levelConfig: LevelConfigData): boolean` — rein synchroner Rückgabewert: `true` bei erfolgreicher Platzierung, `false` wenn ignoriert (kein aktives Target, Spieler-Kachel ungültig, oder für dieses Target bereits eine Bombe platziert). Mutiert selbst **keine** Lives/Score — das macht `GameService`.
 - Erzeugt das Gefahrenzonen-Weltvisual (Ring/markierte Kacheln, Radius `SafeDistanceTiles * TileSize`), siehe [`decisions/005-danger-zone-world-visual.md`](decisions/005-danger-zone-world-visual.md).
+- Event `BombExploded(player: Player)` — gefeuert beim Ablauf der Fuse (`levelConfig.BombFuse`), vor der Validierung.
+- Event `BombResolved(player: Player, outcome: BombOutcome)` — gefeuert direkt nach `BombExploded` mit dem validierten Ergebnis (Spec §24). Das asynchrone Ergebnis wird bewusst per Signal statt per Rückgabewert geliefert, siehe [`decisions/009-bomb-outcome-via-signal.md`](decisions/009-bomb-outcome-via-signal.md).
 
 ### `GameService`
 - Hält `PlayerSessionData` pro Spieler und die State Machine (die 7+1 Zustände aus Spec §34).
-- Verarbeitet `ClientAction`: `RequestPlay` → neue Session (Level 1, Score 0, 3 Leben), `PlaceBomb` → `BombService.TryPlaceBomb`.
+- Verarbeitet `ClientAction`: `RequestPlay` → neue Session (Level 1, Score 0, 3 Leben), `PlaceBomb` → `BombService.TryPlaceBomb` (bei Erfolg State-Übergang nach `BOMB_PLACED`); reagiert auf `BombService.BombExploded`/`BombResolved` mit den Übergängen nach `EXPLODING`/`ROUND_RESULT`.
 - Wendet Konsequenzen an: Score/Zeitbonus (Spec §28), Level-Aufstieg (Spec §30, [`decisions/007`](decisions/007-board-size-fixed-per-session.md)), Lebensverlust bei Timeout/MISS/HIT_BY_EXPLOSION/Fall (genau 1 Leben pro Vorfall, nie kumuliert, Spec §24), Game Over bei 0 Leben.
 - Broadcastet `GameEvent` an den/die betroffenen Client(s).
 

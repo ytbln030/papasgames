@@ -3,12 +3,12 @@
 -- Zentrale Zustandsmaschine (Spec §34) und einzige Stelle, die
 -- PlayerSessionData mutiert. Orchestriert BoardService/PlayerService/
 -- TargetService/BombService, reagiert auf ClientAction und broadcastet
--- GameEvent. Siehe ARCHITECTURE.md Abschnitt 7/8 und
--- tasks/006-networking-and-state-machine.md.
+-- GameEvent. Siehe ARCHITECTURE.md Abschnitt 7/8, tasks/006-networking-and-
+-- state-machine.md und tasks/007-bomb-and-explosion.md.
 --
--- Bomben-Platzierung/-Validierung (Task 007) sowie vollständige, geprüfte
--- Score-/Level-/Game-Over-Logik (Task 008) sind hier bewusst nur als
--- Platzhalter vorhanden, damit der Spiel-Loop nicht einfriert.
+-- Vollständige, geprüfte Score-/Level-/Game-Over-Logik (Task 008) ist hier
+-- bewusst nur als rudimentärer Lebens-Dekrement vorhanden, damit der
+-- Spiel-Loop nicht einfriert.
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -27,6 +27,7 @@ local BombService = require(script.Parent.BombService)
 type GridPosition = GameTypes.GridPosition
 type GameStateName = GameTypes.GameStateName
 type PlayerSessionData = GameTypes.PlayerSessionData
+type BombOutcome = GameTypes.BombOutcome
 
 local GameService = {}
 
@@ -101,6 +102,26 @@ local function onRequestPlay(player: Player): ()
 	setState(player, "TARGET_ACTIVE")
 end
 
+-- Task 007: delegiert an BombService.TryPlaceBomb, nur solange die Session
+-- im Zustand TARGET_ACTIVE ist (Spec §18). BombService garantiert zusätzlich
+-- selbst höchstens eine Bombe pro Target, auch bei direkten Aufrufen ohne
+-- GameService (z. B. Command-Bar-Tests).
+local function onPlaceBomb(player: Player): ()
+	local session = sessions[player]
+	if not session or session.state ~= "TARGET_ACTIVE" then
+		return
+	end
+
+	local levelConfig = LevelConfig.GetConfig(session.level)
+	local placed = BombService.TryPlaceBomb(player, levelConfig)
+	if not placed then
+		return
+	end
+
+	setState(player, "BOMB_PLACED")
+	fireGameEvent(player, { type = Net.GameEventType.BombPlaced })
+end
+
 local function onClientAction(player: Player, action: any): ()
 	if type(action) ~= "table" then
 		return
@@ -108,7 +129,31 @@ local function onClientAction(player: Player, action: any): ()
 
 	if action.type == Net.ClientActionType.RequestPlay then
 		onRequestPlay(player)
+	elseif action.type == Net.ClientActionType.PlaceBomb then
+		onPlaceBomb(player)
 	end
+end
+
+-- Fuse abgelaufen, Explosion läuft, Ergebnis steht noch nicht fest (Spec
+-- §23). Nur ein StateChanged, keine eigene Spielkonsequenz.
+local function onBombExploded(player: Player): ()
+	local session = sessions[player]
+	if session and session.state == "BOMB_PLACED" then
+		setState(player, "EXPLODING")
+	end
+end
+
+-- Validiertes Ergebnis von BombService (Spec §24). Score-/Lebens-
+-- Konsequenzen folgen in Task 008 - hier nur der State-Übergang plus
+-- Broadcast des Ergebnisses.
+local function onBombResolved(player: Player, outcome: BombOutcome): ()
+	local session = sessions[player]
+	if not session then
+		return
+	end
+
+	setState(player, "ROUND_RESULT")
+	fireGameEvent(player, { type = Net.GameEventType.RoundResult, outcome = outcome })
 end
 
 -- Platzhalter-Reaktion (volle Konsequenz-Logik inkl. Game-Over-Prüfung folgt
@@ -172,6 +217,8 @@ function GameService.Init(): ()
 	clientActionRemote.OnServerEvent:Connect(onClientAction)
 	TargetService.TargetExpired:Connect(onTargetExpired)
 	PlayerService.PlayerFell:Connect(onPlayerFell)
+	BombService.BombExploded:Connect(onBombExploded)
+	BombService.BombResolved:Connect(onBombResolved)
 
 	Players.PlayerAdded:Connect(onPlayerAdded)
 	Players.PlayerRemoving:Connect(onPlayerRemoving)
