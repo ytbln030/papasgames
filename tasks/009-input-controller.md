@@ -56,4 +56,15 @@
 
 ## Ergebnis (von der ausführenden Task-Session auszufüllen)
 
-_Noch nicht ausgeführt._
+Implementiert: `src/client/Controllers/InputController.luau` (neu), gestartet in `src/client/init.client.luau` nach `GameClientController.Init()`. Bindet `"PlaceBomb"` via `ContextActionService:BindActionAtPriority(..., true, Enum.ContextActionPriority.Default.Value, Enum.KeyCode.E)` (mit `createTouchButton = true`) und setzt den Button-Titel per `ContextActionService:SetTitle("PlaceBomb", "BOMB")`. Feuert bei `Enum.UserInputState.Begin` ausschließlich über `Net.ClientActionType.PlaceBomb` / `clientActionRemote:FireServer(...)`. Keine Abhängigkeit auf `GameClientController`.
+
+Manuelle Verifikation in Roblox Studio (Play-Test, über MCP-Tools durchgeführt, nicht nur beschrieben):
+
+1. **AK1 (Einzeldruck löst genau einmal aus):** Play-Test gestartet, temporären Server-Listener auf `Remotes.ClientAction.OnServerEvent` installiert, der `PlaceBomb`-Payloads zählt und printet. Einzelner `E`-Tastendruck (`user_keyboard_input`, `keyPress`) → Server-Log zeigt genau 1 Ereignis (`[Test009] PlaceBomb #1 from BlumiXFan`). ✅
+2. **AK3 (gehaltene Taste löst nicht mehrfach aus):** `E` 3 Sekunden gehalten (`keyDown` → `wait 3000ms` → `keyUp`) → Zähler stieg nur um 1 (von 1 auf 2 gesamt), kein Repeat-Spam. ✅
+3. **AK2 (mobiler Touch-Button):** Code-seitig verifiziert (`createTouchButton = true` im Bind-Aufruf, Titel `"BOMB"` per `SetTitle`). Die tatsächliche Geräte-Emulation ("Device"-Umschaltung) ist eine Studio-Ribbon-Einstellung (Test-Tab), die vor dem Play-Start gesetzt werden muss und über die verfügbaren MCP-Tools (`execute_luau`, `user_keyboard_input`, `user_mouse_input` — alle nur auf das laufende Spiel/DataModel, nicht auf die Studio-IDE-Ribbon-UI bezogen) nicht automatisiert umschaltbar ist. Indirekt bestätigt: Mit `UserInputService.TouchEnabled == false` (Standard-PC-Emulation) wurde erwartungsgemäß **kein** `ContextActionGui` in `CoreGui` erzeugt (kein Touch-Button ohne Touch-Gerät) — das bestätigt, dass die Bind-Logik korrekt an die Touch-Fähigkeit des Geräts koppelt. Eine manuelle Prüfung mit echter Device-Emulation im Studio-Test-Tab durch den Nutzer wird empfohlen, um AK2 vollständig abzuschließen.
+4. **AK4 (Taste feuert auch ohne laufende Session/State MENU):** Während der gesamten Testreihe wurde `GameClientController.RequestPlay()` nie aufgerufen, der Server befand sich also im initialen `MENU`-Zustand — die `E`-Tastendrücke haben trotzdem beide Male das `ClientAction`-Remote gefeuert (siehe Punkt 1/2). `InputController` unterdrückt die Aktion nicht selbst. ✅
+
+Temporärer Server-Test-Listener war nur zur Laufzeit im Play-Test aktiv (via `execute_luau`, nicht im Quellcode) und wurde durch das Beenden des Play-Tests (`start_stop_play(false)`) automatisch verworfen — keine Code-Änderung im Repo dafür nötig.
+
+**Fazit:** AK1, AK3, AK4 vollständig automatisiert verifiziert. AK2 code-seitig korrekt implementiert, aber die Device-Emulation-UI selbst konnte mit den verfügbaren Tools nicht angesteuert werden — manuelle Stichprobe durch den Nutzer empfohlen.
