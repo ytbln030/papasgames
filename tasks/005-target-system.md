@@ -71,4 +71,15 @@
 
 ## Ergebnis (von der ausführenden Task-Session auszufüllen)
 
-_Noch nicht ausgeführt._
+`TargetService.luau` implementiert und über die Roblox-Studio-MCP-Tools (`execute_luau`, `start_stop_play`, `screen_capture`, `get_console_output`) in der verbundenen Studio-Instanz ("Papas game") verifiziert. Alle Checks liefen im Play-Mode (frischer Server-VM, damit Modul-Require nicht gegen einen gecachten Edit-Mode-Fehlerstand lief — siehe Implementierungsnotiz unten).
+
+1. 10× `TargetService.CreateTarget(LevelConfig.GetConfig(1), {x=15,y=15})` (zwischen den Aufrufen `DestroyActiveTarget`): in allen 10 Durchläufen `left.y==right.y==center.y`, `top.x==bottom.x==center.x`, Margin-Bedingung und Board-Grenzen erfüllt (`align=true margin=true bounds=true` für alle 10). Abstände variierten sichtbar zwischen 3–5 Kacheln, nicht über alle 10 Durchläufe identisch (`allDistancesIdenticalAcrossAllRuns=false`).
+2. Visuell im Play-Test per `screen_capture` bestätigt: Kreuz erscheint als deutlich erkennbares türkises Glow (Neon-Material + PointLight), sowohl aus mittlerer Entfernung als auch aus großer Entfernung (Screenshot `Task005_Target_FarDistance`) klar von der grauen Kachelfläche unterscheidbar.
+3. `ValidateBombTile`: `true` nur für `center`, `false` für `left`/`right`/`top`/`bottom` sowie für zwei weitere beliebige Kacheln. Nach `DestroyActiveTarget` liefert `ValidateBombTile(center)` wieder `false`, `GetActiveTarget()` ist `nil`, der `Target`-Folder im Workspace ist entfernt.
+4. Lifetime auf 3s gesetzt: `TargetExpired` feuerte nach Ablauf genau einmal (`expiredCount=1`). Zweiter Durchlauf mit manuellem `DestroyActiveTarget` 1s nach Erzeugung (vor Ablauf): kein weiteres `TargetExpired`-Event danach (`expiredCount` blieb bei 1).
+5. `playerPosition = {x=15,y=15}` (Board-Mitte) über 30 Generierungen: keine einzige Verletzung von `MinSpawnDistanceFromTarget=4` (`violations=0`).
+6. Alle vier Kugeln eines Kreuzes hatten pro Durchlauf exakt dieselbe Farbe; über die 10 Durchläufe wechselte die Farbe sichtbar zufällig innerhalb der `ColorPalette`.
+
+Alle Akzeptanzkriterien erfüllt.
+
+**Implementierungsnotiz (kein Spec-/Architektur-Fehler, reine Luau-Syntaxkorrektur):** Die ursprüngliche Rückgabetyp-Annotation von `generateCandidate` als `(GridPosition, number, number, number, number)?` ist kein gültiges Luau (optionales `?` ist auf eine geklammerte Mehrfachrückgabe-Tupel-Annotation nicht anwendbar) und führte zu einem Parse-Fehler beim Laden des Moduls. Behoben durch Einführung eines lokalen `Candidate`-Typs (Tabelle statt Tupel) als Rückgabewert von `generateCandidate`. Funktional keine Änderung gegenüber der Spezifikation. Nebenbefund dabei: ein fehlgeschlagenes `require()` eines ModuleScripts bleibt in einer laufenden Edit-Mode-DataModel-Session gecacht, auch nachdem Rojo den korrigierten `Source` live synchronisiert hat — zur Verifikation wurde testweise in den Play-Mode gewechselt (frische Server-VM).
